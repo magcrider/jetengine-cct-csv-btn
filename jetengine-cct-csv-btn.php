@@ -22,11 +22,38 @@ add_action('wp_ajax_dcms_ajax_readmore', 'dcms_enviar_contenido');
 
 function dcms_enviar_contenido()
 {
-    global $wpdb;
-    $cct_elements = $wpdb->get_results("SELECT * FROM wp_jet_cct_leads LIMIT 200");
+
+    $leads_table = $_POST['leads_table'] ? $_POST['leads_table'] : 'wp_jet_cct_leads';
+    $school_id = $_POST['school_id'] ? $_POST['school_id'] : '0';
+
+    mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+    $mysqli = new mysqli(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
+
+    $query = "
+    SET @cols := (SELECT GROUP_CONCAT(column_name SEPARATOR ', ') AS columns FROM information_schema.columns WHERE table_name = '" . $leads_table . "' AND table_schema = '" . DB_NAME . "');
+    SET @colnames := (SELECT CONCAT('\'', GROUP_CONCAT(column_name SEPARATOR '\', \''),'\'') AS columns FROM information_schema.columns WHERE table_name = '" . $leads_table . "' AND table_schema = '" . DB_NAME . "');
+    SET @getheaders := CONCAT('SELECT ', @colnames);
+    SET @getdata := CONCAT('(', @getheaders, ') UNION (SELECT ', @cols, ' FROM " . $leads_table . " WHERE lead_school_id = " . $school_id . ")');
+    PREPARE leadsquery FROM @getdata;
+    EXECUTE leadsquery;
+    DEALLOCATE PREPARE leadsquery;
+    ";
+
     $cct_elements_to_csv = array();
-    foreach ($cct_elements as $line) {
-        array_push($cct_elements_to_csv, (array) $line);
+    $mysqli->multi_query($query);
+    do {
+        /* store the result set in PHP */
+        if ($result = $mysqli->store_result()) {
+            while ($row = $result->fetch_row()) {
+                array_push($cct_elements_to_csv, $row);
+            }
+        }
+    } while ($mysqli->next_result());
+
+
+    if ($mysqli->connect_error) {
+        die('Connection error (' . $mysqli->connect_errno . ') '
+            . $mysqli->connect_error);
     }
 
     $f = fopen('php://output', 'w');
@@ -43,10 +70,11 @@ function cct_csv_link_att($atts)
 {
 
     $default = array(
-        'link' => '#',
+        'school_id' => '',
+        'leads_table' => '',
     );
     $a = shortcode_atts($default, $atts);
 
-    return '<button class="download-csv">Download CSV</button>';
+    return '<button class="download-csv" school-id="' . $a['school_id'] . '" leads-t="' . $a['leads_table'] . '">Download CSV</button>';
 }
 add_shortcode('cct_csv', 'cct_csv_link_att');
